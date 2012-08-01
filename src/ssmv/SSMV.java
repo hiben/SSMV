@@ -133,8 +133,30 @@ public class SSMV implements Runnable {
 	private BufferedImage leftEyeImage = null;
 	private BufferedImage rightEyeImage = null;
 	
+	private boolean swap = prefs.getBoolean(prefSwap, prefSwapDefault);
+	
 	private JFileChooser openChooser;
 	private JFileChooser saveChooser;
+	
+	private boolean isSwap() {
+		return swap;
+	}
+	
+	private void setSwap(boolean swap) {
+		this.swap = swap;
+	}
+	
+	private BufferedImage getLeft() {
+		return swap ? rightEyeImage : leftEyeImage;
+	}
+
+	private BufferedImage getRight() {
+		return swap ? leftEyeImage : rightEyeImage;
+	}
+	
+	private boolean validImage() {
+		return leftEyeImage != null;
+	}
 	
 	private WindowAdapter windowListener = new WindowAdapter() {
 
@@ -212,7 +234,7 @@ public class SSMV implements Runnable {
 		});
 	}
 	
-	private void saveImage(BufferedImage bi) {
+	private void saveImage(BufferedImage bi, String dialogTitle) {
 		if(saveChooser == null) {
 			if(openChooser == null) {
 				saveChooser = new JFileChooser();
@@ -220,6 +242,7 @@ public class SSMV implements Runnable {
 				saveChooser = new JFileChooser(openChooser.getCurrentDirectory());
 			}
 		}
+		saveChooser.setDialogTitle(dialogTitle);
 		boolean canLeave = false;
 		while(!canLeave) {
 			canLeave = true;
@@ -235,8 +258,10 @@ public class SSMV implements Runnable {
 				}
 
 				if(f.exists()) {
-					if(JOptionPane.showConfirmDialog(frame, "File '" + f.getName() + "' already exists. Overwrite ?") != JOptionPane.OK_OPTION)
-						return;
+					if(JOptionPane.showConfirmDialog(frame, "File '" + f.getName() + "' already exists. Overwrite ?") != JOptionPane.OK_OPTION) {
+						canLeave = false;
+						continue;
+					}
 				}
 
 				try {
@@ -275,13 +300,13 @@ public class SSMV implements Runnable {
 				frame.dispatchEvent(new WindowEvent(frame, WindowEvent.WINDOW_CLOSING));
 			}
 			if(acSaveLeft.equals(e.getActionCommand())) {
-				if(leftEyeImage!=null) {
-					saveImage(stereoPanel.isSwap() ? leftEyeImage : rightEyeImage);
+				if(validImage()) {
+					saveImage(getRight(), "Save image on the left as..."); // right eye image is on the left
 				}
 			}
 			if(acSaveRight.equals(e.getActionCommand())) {
-				if(leftEyeImage!=null) {
-					saveImage(stereoPanel.isSwap() ? rightEyeImage : leftEyeImage);
+				if(validImage()) {
+					saveImage(getLeft(), "Save image on the right as...");  // left eye image is on the right
 				}
 			}
 		}
@@ -319,8 +344,9 @@ public class SSMV implements Runnable {
 		public void actionPerformed(ActionEvent e) {
 			if(acSwap.equals(e.getActionCommand())) {
 				JCheckBoxMenuItem jcbi = (JCheckBoxMenuItem)e.getSource();
-				stereoPanel.setSwap(jcbi.isSelected());
-				prefs.putBoolean(prefSwap, stereoPanel.isSwap());
+				setSwap(jcbi.isSelected());
+				prefs.putBoolean(prefSwap, isSwap());
+				stereoPanel.repaint();
 			}
 			if(acHelpPoints.equals(e.getActionCommand())) {
 				JCheckBoxMenuItem jcbi = (JCheckBoxMenuItem)e.getSource();
@@ -386,8 +412,6 @@ public class SSMV implements Runnable {
 		
 		private int hgap = prefs.getInt(prefHGap, prefHGapDefault);
 		
-		private boolean swap = prefs.getBoolean(prefSwap, prefSwapDefault);
-		
 		private boolean helpPoints = prefs.getBoolean(prefHelpPoints, prefHelpPointsDefault);
 		
 		public void setHGap(int hgap) {
@@ -435,18 +459,6 @@ public class SSMV implements Runnable {
 			return hborder;
 		}
 		
-		public boolean isSwap() {
-			return swap;
-		}
-		
-		public void setSwap(boolean swap) {
-			if(this.swap == swap)
-				return;
-			
-			this.swap = swap;
-			repaint();
-		}
-		
 		public boolean isHelpPoints() {
 			return helpPoints;
 		}
@@ -482,7 +494,7 @@ public class SSMV implements Runnable {
 		
 		@Override
 		public void paintComponent(Graphics g) {
-			if(leftEyeImage==null) {
+			if(!validImage()) {
 				super.paintComponent(g);
 				return;
 			}
@@ -510,8 +522,8 @@ public class SSMV implements Runnable {
 				
 			}
 			
-			g2d.drawImage(swap ? leftEyeImage : rightEyeImage, null, delta_h + hborder, delta_v + vborder);
-			g2d.drawImage(swap ? rightEyeImage : leftEyeImage, null, delta_h + hborder + iw + hgap, delta_v + vborder);
+			g2d.drawImage(getRight(), null, delta_h + hborder, delta_v + vborder);
+			g2d.drawImage(getLeft(), null, delta_h + hborder + iw + hgap, delta_v + vborder);
 		}
 	}
 	
