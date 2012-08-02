@@ -66,13 +66,16 @@ public class SSMV implements Runnable {
 
 	private static Preferences prefs = Preferences.userNodeForPackage(SSMV.class);
 	
-	public static enum StereoMode { Cross, Wiggle };
+	public static enum StereoMode { Cross, Anaglyph, Wiggle };
 	
 	public static final String SCross = "Cross";
 	public static final String SWiggle = "Wiggle";
+	public static final String SAnaglyph = "Anaglyph";
 	
 	public static String smToString(StereoMode sm) {
 		switch(sm) {
+		case Anaglyph:
+			return SAnaglyph;
 		case Wiggle:
 			return SWiggle;
 		default:
@@ -81,6 +84,8 @@ public class SSMV implements Runnable {
 	}
 	
 	public static StereoMode stringToSM(String s) {
+		if(SAnaglyph.toLowerCase().equals(s.toLowerCase()))
+			return StereoMode.Anaglyph;
 		if(SWiggle.toLowerCase().equals(s.toLowerCase()))
 			return StereoMode.Wiggle;
 		
@@ -98,11 +103,15 @@ public class SSMV implements Runnable {
 	
 	public static final String prefWiggleDelay = "wiggledelay";
 	
+	public static final String prefAnaglyphMask = "anaglyphmask";
+	
 	public static final int prefHGapDefault = 10;
 	public static final int prefHBorderDefault = 10;
 	public static final int prefVBorderDefault = 10;
 
 	public static final int prefWiggleDelayDefault = 80;
+
+	public static final int prefAnaglyphMaskDefault = 0;
 	
 	public static final boolean prefSwapDefault = false;
 	public static final boolean prefHelpPointsDefault = true;
@@ -119,9 +128,26 @@ public class SSMV implements Runnable {
 	private static final String acHBorder = "hborder";
 	private static final String acSaveLeft = "saveleft";
 	private static final String acSaveRight = "saveright";
+	private static final String acSaveAnaglyph = "saveanaglyph";
 	private static final String acCross = "modecross";
+	private static final String acAnaglyph = "modeanaglyph";
+	private static final String acAnaglyphMask = "modeanaglyphmask";
 	private static final String acWiggle = "modewiggle";
 	private static final String acWiggleDelay = "wiggledelay";
+	
+	private static final int [] anaglyphMasks = {
+		0xFF0000, // red
+		0x00FF00, // green
+		0x0000FF // blue
+	};
+	
+	private static final String [] anaglyphMaskNames = {
+		"red/cyan",
+		"green/magenta",
+		"blue/yellow"
+	};
+	
+	private static final String dAMIndex = "amindex";
 	
 	private static final String about =
 			"SSMV - Super Simple MPO Viewer v1.0\n" +
@@ -135,11 +161,17 @@ public class SSMV implements Runnable {
 			"MPO files are really just two JPEG images that have been saved into one file. The first one is for the left eye " +
 			"while the second one is meant to be viewed with the right eye to perceive a three-dimensional effect.\n" +
 			"The most cost effective way of viewing these images is by applying the cross-eyed or wall-eyed technique on the two " +
-			"imaged displayed next to each other. I personally find cross-eyed viewing easier but this application supports also " +
+			"images displayed next to each other. I personally find cross-eyed viewing easier but this application supports also " +
 			"wall-eyed viewing if you select 'Swap' from the 'Image' menu.\n" +
 			"\n" +
 			"If you need help aligning your eyes, helper points can be displayed above the image (default setting). Sometimes it is easier " +
 			"to concentrate just on the dots instead of the image.\n" +
+			"\n" +
+			"In addition two viewing the images side by side, the application also supports 'wiggle' stereo, where the two images " +
+			"are quickly swapped. The effect depends strongly on the image...\n" +
+			"Your last option is viewing the images in anaglyph form where the left and right images are color-filtered. If you happen " +
+			"to have on of these red/cyan glasses lying around this might be worth a try (but this mode implies bad colors...).\n" +
+			"You can also choose between the three possible filter combinations or us swap to switch sides...\n" +
 			"\n" +
 			"LICENSE (MIT)\n" +
 			"\n" +
@@ -345,6 +377,11 @@ public class SSMV implements Runnable {
 					saveImage(getLeft(), "Save image on the right as...");  // left eye image is on the right
 				}
 			}
+			if(acSaveAnaglyph.equals(e.getActionCommand())) {
+				if(validImage()) {
+					saveImage(stereoPanel.getAnaglyphImage(), "Save anaglyph image..."); 
+				}
+			}
 		}
 	};
 	
@@ -392,6 +429,21 @@ public class SSMV implements Runnable {
 			if(acWiggle.equals(e.getActionCommand())) {
 				stereoPanel.setStereoMode(StereoMode.Wiggle);
 				prefs.put(prefMode, smToString(stereoPanel.getStereoMode()));
+				stereoPanel.repaint();
+			}
+			if(acAnaglyph.equals(e.getActionCommand())) {
+				stereoPanel.setStereoMode(StereoMode.Anaglyph);
+				prefs.put(prefMode, smToString(stereoPanel.getStereoMode()));
+				stereoPanel.repaint();
+			}
+			if(acAnaglyphMask.equals(e.getActionCommand())) {
+				JMenuItem jmi = (JMenuItem)e.getSource();
+				Integer amindex = (Integer)jmi.getClientProperty(dAMIndex);
+				if(amindex==null)
+					amindex = 0;
+				
+				stereoPanel.setAnanglyphMaskIndex(amindex);
+				prefs.putInt(prefAnaglyphMask, stereoPanel.getAnaglyphyMaskIndex());
 				stereoPanel.repaint();
 			}
 			if(acHelpPoints.equals(e.getActionCommand())) {
@@ -461,6 +513,8 @@ public class SSMV implements Runnable {
 	}
 	
 	private void adjustImageAreaInFrame() {
+		if(stereoPanel!=null)
+			stereoPanel.invalidate();
 		if( (frame.getExtendedState()&Frame.MAXIMIZED_BOTH) == 0 ) {
 			frame.pack();
 		} else {
@@ -468,6 +522,35 @@ public class SSMV implements Runnable {
 			if(stereoPanel!=null)
 				stereoPanel.repaint();
 		}
+	}
+	
+	private static boolean hasTransparency(BufferedImage bi) {
+		return bi.getTransparency() != BufferedImage.OPAQUE;
+	}
+	
+	public static BufferedImage createAnaglyphImage(BufferedImage left, BufferedImage right, int leftMask, BufferedImage dst) {
+		int w = left.getWidth();
+		int h = left.getHeight();
+
+		if(dst == null || dst.getWidth() != w || dst.getHeight() != h || hasTransparency(left) != hasTransparency(dst)) {
+			dst = new BufferedImage(w, h, hasTransparency(left) ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+		}
+		
+		int [] rgbdatal = new int [w * h];
+		left.getRGB(0, 0, w, h, rgbdatal, 0, w);
+		int [] rgbdatar = new int [w * h];
+		right.getRGB(0, 0, w, h, rgbdatar, 0, w);
+		
+		int lmask = ((leftMask & 0x00FFFFFF) | 0xFF000000);
+		int rmask = ((~leftMask) & 0x00FFFFFF);
+		
+		for(int i=0; i<rgbdatal.length; i++) {
+			rgbdatal[i] = (rgbdatal[i] & lmask) | (rgbdatar[i] & rmask);
+		}
+		
+		dst.setRGB(0, 0, w, h, rgbdatal, 0, w);
+		
+		return dst;
 	}
 	
 	public class StereoPanel extends JPanel {
@@ -485,8 +568,35 @@ public class SSMV implements Runnable {
 		
 		private boolean helpPoints = prefs.getBoolean(prefHelpPoints, prefHelpPointsDefault);
 		
+		private BufferedImage anaglyphSourceLeft = null;
+		private BufferedImage anaglyphSourceRight = null;
+		private BufferedImage anaglyph = null;
+		
+		private int usedIndex = -1;
+		private int anaglyphMaskIndex;
+		
 		public StereoPanel() {
 			setStereoMode(stringToSM(prefs.get(prefMode, prefModeDefault)));
+			setAnanglyphMaskIndex(prefs.getInt(prefAnaglyphMask, prefAnaglyphMaskDefault));
+		}
+		
+		public BufferedImage getAnaglyphImage() {
+			if(!validImage())
+				return null;
+			
+			if(anaglyph == null || anaglyphSourceLeft != getLeft() || usedIndex != anaglyphMaskIndex) {
+				anaglyphSourceLeft = getLeft();
+				anaglyphSourceRight = getRight();
+				anaglyph = createAnaglyphImage(anaglyphSourceLeft, anaglyphSourceRight, anaglyphMasks[anaglyphMaskIndex], anaglyph);
+			}
+			return anaglyph;
+		}
+		
+		public BufferedImage getWiggleImage() {
+			if(!validImage())
+				return null;
+			
+			return wiggleTurn ? getRight() : getLeft();
 		}
 		
 		private class WiggleThread extends Thread {
@@ -507,10 +617,14 @@ public class SSMV implements Runnable {
 						sleep(wiggleDelay);
 					} catch (InterruptedException e) {
 					}
-
-					if(validImage()) {
-						wiggleTurn = !wiggleTurn;
-						repaint();
+					
+					if(mode==StereoMode.Wiggle) {
+						if(validImage()) {
+							wiggleTurn = !wiggleTurn;
+							repaint();
+						}
+					} else {
+						break;
 					}
 				}
 			}
@@ -593,6 +707,21 @@ public class SSMV implements Runnable {
 			adjustImageAreaInFrame();
 		}
 		
+		public void setAnanglyphMaskIndex(int ami) {
+			if(ami == anaglyphMaskIndex)
+				return;
+			
+			if(ami < 0 || ami >= anaglyphMasks.length)
+				ami = 0;
+			anaglyphMaskIndex = ami;
+			
+			repaint();
+		}
+		
+		public int getAnaglyphyMaskIndex() {
+			return anaglyphMaskIndex;
+		}
+		
 		public void setHelpPoints(boolean helpPoints) {
 			if(this.helpPoints == helpPoints)
 				return;
@@ -614,6 +743,7 @@ public class SSMV implements Runnable {
 				return super.getMinimumSize();
 
 			switch(mode) {
+			case Anaglyph:
 			case Wiggle:
 				return new Dimension(getLeft().getWidth() + 2 * hborder, getLeft().getHeight() + 2 * vborder);
 			default:
@@ -656,9 +786,14 @@ public class SSMV implements Runnable {
 			int delta_v = (h - (ih + 2 * vborder)) / 2;;
 			
 			switch(mode) {
+			case Anaglyph:
+				delta_h = (w - (iw + 2 * hborder)) / 2;
+				
+				g2d.drawImage(getAnaglyphImage(), null, delta_h + hborder, delta_v + vborder);
+				break;
 			case Wiggle:
 				delta_h = (w - (iw + 2 * hborder)) / 2;
-				g2d.drawImage(wiggleTurn ? getRight() : getLeft(), null, delta_h + hborder, delta_v + vborder);
+				g2d.drawImage(getWiggleImage(), null, delta_h + hborder, delta_v + vborder);
 				break;
 			default:
 				delta_h = (w - (iw*2 + hgap + 2 * hborder)) / 2;
@@ -719,6 +854,7 @@ public class SSMV implements Runnable {
 		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(fileAction), acOpen, "Open...", 'O'), KeyStroke.getKeyStroke(KeyEvent.VK_O, KeyEvent.CTRL_MASK)));
 		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(fileAction), acSaveLeft, "Save left image...", 'L'), KeyStroke.getKeyStroke(KeyEvent.VK_L, KeyEvent.CTRL_MASK)));
 		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(fileAction), acSaveRight, "Save right image...", 'R'), KeyStroke.getKeyStroke(KeyEvent.VK_R, KeyEvent.CTRL_MASK)));
+		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(fileAction), acSaveAnaglyph, "Save anaglyph image...", 'Y'), KeyStroke.getKeyStroke(KeyEvent.VK_Y, KeyEvent.CTRL_MASK)));
 		fileMenu.addSeparator();
 		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(aboutAction), acAbout, "About...", 'A'), KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0)));
 		fileMenu.addSeparator();
@@ -734,23 +870,45 @@ public class SSMV implements Runnable {
 		ButtonGroup bg = new ButtonGroup();
 		
 		JMenuItem miCross = withKeyStroke(setACAndText(new JRadioButtonMenuItem(imageAction), acCross, "Cross-Eyed", 'C'), KeyStroke.getKeyStroke(KeyEvent.VK_C, KeyEvent.CTRL_MASK));;
+		JMenuItem miAnaglyph = withKeyStroke(setACAndText(new JRadioButtonMenuItem(imageAction), acAnaglyph, "Anaglyph", 'A'), KeyStroke.getKeyStroke(KeyEvent.VK_A, KeyEvent.CTRL_MASK));
 		JMenuItem miWiggle = withKeyStroke(setACAndText(new JRadioButtonMenuItem(imageAction), acWiggle, "Wiggle", 'W'), KeyStroke.getKeyStroke(KeyEvent.VK_W, KeyEvent.CTRL_MASK));
 		
 		bg.add(miCross);
+		bg.add(miAnaglyph);
 		bg.add(miWiggle);
 		
 		switch(stereoPanel.getStereoMode()) {
 		case Cross:
 			miCross.setSelected(true);
 			break;
+		case Anaglyph:
+			miAnaglyph.setSelected(true);
+			break;
 		case Wiggle:
 			miWiggle.setSelected(true);
+			break;
 		}
 		
 		modeSub.add(miCross);
+		modeSub.add(miAnaglyph);
 		modeSub.add(miWiggle);
 		
 		imageMenu.add(modeSub);
+		
+		JMenuItem anaglyphMaskSub = new JMenu("Anaglyph Mask");
+		ButtonGroup ambg = new ButtonGroup();
+		
+		int amset = stereoPanel.getAnaglyphyMaskIndex();
+		for(int i=0; i<anaglyphMasks.length; i++) {
+			JMenuItem mimask = setACAndText(new JRadioButtonMenuItem(imageAction), acAnaglyphMask, anaglyphMaskNames[i], null);
+			mimask.putClientProperty(dAMIndex, Integer.valueOf(i));
+			ambg.add(mimask);
+			if(amset == i)
+				mimask.setSelected(true);
+			anaglyphMaskSub.add(mimask);
+		}
+
+		imageMenu.add(anaglyphMaskSub);
 		
 		imageMenu.add(setACAndText(new JMenuItem(imageAction), acHGap, "Horz. Gap...", 'G'));
 		imageMenu.add(setACAndText(new JMenuItem(imageAction), acHBorder, "Horz. Border...", 'H'));
