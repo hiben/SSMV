@@ -23,7 +23,9 @@ SOFTWARE.
 package ssmv;
 
 import java.awt.Dimension;
+
 import java.awt.EventQueue;
+import java.awt.Frame;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsDevice;
@@ -45,6 +47,7 @@ import java.util.prefs.Preferences;
 
 import javax.imageio.ImageIO;
 import javax.swing.AbstractAction;
+import javax.swing.ButtonGroup;
 import javax.swing.JCheckBoxMenuItem;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -53,6 +56,7 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JRadioButtonMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.KeyStroke;
@@ -62,19 +66,48 @@ public class SSMV implements Runnable {
 
 	private static Preferences prefs = Preferences.userNodeForPackage(SSMV.class);
 	
+	public static enum StereoMode { Cross, Wiggle };
+	
+	public static final String SCross = "Cross";
+	public static final String SWiggle = "Wiggle";
+	
+	public static String smToString(StereoMode sm) {
+		switch(sm) {
+		case Wiggle:
+			return SWiggle;
+		default:
+			return SCross;
+		}
+	}
+	
+	public static StereoMode stringToSM(String s) {
+		if(SWiggle.toLowerCase().equals(s.toLowerCase()))
+			return StereoMode.Wiggle;
+		
+		return StereoMode.Cross;
+	}
+	
 	public static final String prefHGap = "hgap";
 	public static final String prefHBorder = "hborder";
 	public static final String prefVBorder = "vborder";
 
 	public static final String prefSwap = "swap";
 	public static final String prefHelpPoints = "helppoints";
+
+	public static final String prefMode = "mode";
+	
+	public static final String prefWiggleDelay = "wiggledelay";
 	
 	public static final int prefHGapDefault = 10;
 	public static final int prefHBorderDefault = 10;
 	public static final int prefVBorderDefault = 10;
+
+	public static final int prefWiggleDelayDefault = 80;
 	
 	public static final boolean prefSwapDefault = false;
 	public static final boolean prefHelpPointsDefault = true;
+	
+	public static final String prefModeDefault = SCross; 
 	
 	private static final String acAbout = "about";
 	private static final String acOpen = "open";
@@ -86,6 +119,9 @@ public class SSMV implements Runnable {
 	private static final String acHBorder = "hborder";
 	private static final String acSaveLeft = "saveleft";
 	private static final String acSaveRight = "saveright";
+	private static final String acCross = "modecross";
+	private static final String acWiggle = "modewiggle";
+	private static final String acWiggleDelay = "wiggledelay";
 	
 	private static final String about =
 			"SSMV - Super Simple MPO Viewer v1.0\n" +
@@ -175,7 +211,7 @@ public class SSMV implements Runnable {
 		if( (offset+3) >= data.length)
 			return false;
 		
-		return (data[offset] == (byte)0xFF) && (data[offset+1] == (byte)0xD8) && (data[offset+2] == (byte)0xFF) && (data[offset+3] == (byte)0xE1);
+		return (data[offset] == (byte)0xFF) && (data[offset+1] == (byte)0xD8);
 	}
 	
 	private void loadMPO(InputStream is) throws IOException {
@@ -229,7 +265,7 @@ public class SSMV implements Runnable {
 		
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
-				frame.pack();
+				adjustImageAreaInFrame();
 			}
 		});
 	}
@@ -348,6 +384,16 @@ public class SSMV implements Runnable {
 				prefs.putBoolean(prefSwap, isSwap());
 				stereoPanel.repaint();
 			}
+			if(acCross.equals(e.getActionCommand())) {
+				stereoPanel.setStereoMode(StereoMode.Cross);
+				prefs.put(prefMode, smToString(stereoPanel.getStereoMode()));
+				stereoPanel.repaint();
+			}
+			if(acWiggle.equals(e.getActionCommand())) {
+				stereoPanel.setStereoMode(StereoMode.Wiggle);
+				prefs.put(prefMode, smToString(stereoPanel.getStereoMode()));
+				stereoPanel.repaint();
+			}
 			if(acHelpPoints.equals(e.getActionCommand())) {
 				JCheckBoxMenuItem jcbi = (JCheckBoxMenuItem)e.getSource();
 				stereoPanel.setHelpPoints(jcbi.isSelected());
@@ -383,6 +429,16 @@ public class SSMV implements Runnable {
 					prefs.putInt(prefVBorder, newborder);
 				}
 			}
+			if(acWiggleDelay.equals(e.getActionCommand())) {
+				int wiggledelay = stereoPanel.getWiggleDelay();
+				
+				Integer newdelay = getNumber("New value for wiggle delay (ms)", wiggledelay, "Invalid delay!");
+				
+				if(newdelay!=null) {
+					stereoPanel.setWiggleDelay(newdelay);
+					prefs.putInt(prefWiggleDelay, newdelay);
+				}
+			}
 		}		
 	};
 	
@@ -404,8 +460,23 @@ public class SSMV implements Runnable {
 		return jmi;
 	}
 	
+	private void adjustImageAreaInFrame() {
+		if( (frame.getExtendedState()&Frame.MAXIMIZED_BOTH) == 0 ) {
+			frame.pack();
+		} else {
+			// and here comes the joy of spaghetti code... (happens in constructor)
+			if(stereoPanel!=null)
+				stereoPanel.repaint();
+		}
+	}
+	
 	public class StereoPanel extends JPanel {
 		private static final long serialVersionUID = 1L;
+		
+		private StereoMode mode = null;
+
+		private int wiggleDelay = prefs.getInt(prefWiggleDelay, prefWiggleDelayDefault);
+		private boolean wiggleTurn = false;
 
 		private int hborder = prefs.getInt(prefHBorder, prefHBorderDefault);
 		private int vborder = prefs.getInt(prefVBorder, prefVBorderDefault);
@@ -413,6 +484,39 @@ public class SSMV implements Runnable {
 		private int hgap = prefs.getInt(prefHGap, prefHGapDefault);
 		
 		private boolean helpPoints = prefs.getBoolean(prefHelpPoints, prefHelpPointsDefault);
+		
+		public StereoPanel() {
+			setStereoMode(stringToSM(prefs.get(prefMode, prefModeDefault)));
+		}
+		
+		private class WiggleThread extends Thread {
+			private boolean keepRunning = true;
+			
+			public WiggleThread() {
+				setDaemon(true);
+				start();
+			}
+			
+			public void endWiggle() {
+				keepRunning = false;
+			}
+			
+			public void run() {
+				while(keepRunning) {
+					try {
+						sleep(wiggleDelay);
+					} catch (InterruptedException e) {
+					}
+
+					if(validImage()) {
+						wiggleTurn = !wiggleTurn;
+						repaint();
+					}
+				}
+			}
+		};
+		
+		private WiggleThread wiggleThread = null;
 		
 		public void setHGap(int hgap) {
 			if(this.hgap == hgap)
@@ -422,7 +526,7 @@ public class SSMV implements Runnable {
 				hgap = 0;
 			
 			this.hgap = hgap;
-			frame.pack();
+			adjustImageAreaInFrame();
 		}
 		
 		public void setHBorder(int hborder) {
@@ -433,7 +537,7 @@ public class SSMV implements Runnable {
 				hborder = 0;
 			
 			this.hborder = hborder;
-			frame.pack();
+			adjustImageAreaInFrame();
 		}
 
 		public void setVBorder(int vborder) {
@@ -444,7 +548,7 @@ public class SSMV implements Runnable {
 				vborder = 0;
 			
 			this.vborder = vborder;
-			frame.pack();
+			adjustImageAreaInFrame();
 		}
 	
 		public int getHGap() {
@@ -463,6 +567,32 @@ public class SSMV implements Runnable {
 			return helpPoints;
 		}
 		
+		public StereoMode getStereoMode() {
+			return mode;
+		}
+		
+		public void setStereoMode(StereoMode sm) {
+			if(mode == sm)
+				return;
+			
+			mode = sm;
+			
+			if(mode == StereoMode.Wiggle) {
+				if(wiggleThread!=null) {
+					wiggleThread.endWiggle();
+				}
+
+				wiggleThread = new WiggleThread();
+			} else {
+				if(wiggleThread!=null) {
+					wiggleThread.endWiggle();
+					wiggleThread = null;
+				}
+			}
+			
+			adjustImageAreaInFrame();
+		}
+		
 		public void setHelpPoints(boolean helpPoints) {
 			if(this.helpPoints == helpPoints)
 				return;
@@ -471,22 +601,35 @@ public class SSMV implements Runnable {
 			repaint();
 		}
 		
+		public int getWiggleDelay() {
+			return wiggleDelay;
+		}
+		
+		public void setWiggleDelay(int wd) {
+			wiggleDelay = wd;
+		}
+		
 		public Dimension getMinimumSize() {
-			if(leftEyeImage==null)
+			if(!validImage())
 				return super.getMinimumSize();
-			
-			return new Dimension(leftEyeImage.getWidth()*2 + hgap + 2 * hborder, leftEyeImage.getHeight() + 2 * vborder);
+
+			switch(mode) {
+			case Wiggle:
+				return new Dimension(getLeft().getWidth() + 2 * hborder, getLeft().getHeight() + 2 * vborder);
+			default:
+				return new Dimension(getLeft().getWidth()*2 + hgap + 2 * hborder, getLeft().getHeight() + 2 * vborder);
+			}
 		}
 		
 		public Dimension getPreferredSize() {
-			if(leftEyeImage==null)
+			if(!validImage())
 				return super.getPreferredSize();
 			
 			return getMinimumSize();
 		}
 		
 		public Dimension getMaximumSize() {
-			if(leftEyeImage==null)
+			if(!validImage())
 				return super.getMaximumSize();
 			
 			return getMinimumSize();
@@ -503,27 +646,36 @@ public class SSMV implements Runnable {
 			int w = getWidth();
 			int h = getHeight();
 			
-			int iw = leftEyeImage.getWidth();
-			int ih = leftEyeImage.getHeight();
+			int iw = getLeft().getWidth();
+			int ih = getLeft().getHeight();
 			
 			g2d.setColor(getBackground());
 			g2d.fillRect(0,0,w,h);
 			
-			int delta_h = (w - (iw*2 + hgap + 2 * hborder)) / 2;
-			int delta_v = (h - (ih + 2 * vborder)) / 2;
+			int delta_h;
+			int delta_v = (h - (ih + 2 * vborder)) / 2;;
 			
-			if(helpPoints) {
-				int hpsize = vborder - 4;
-				g2d.setColor(getForeground());
-				int hpx = delta_h + (iw - hpsize) / 2;
-				g2d.fillArc(hpx+1, delta_v+1, hpsize, hpsize, 0, 360);
-				hpx = delta_h + iw + hgap + (iw - hpsize) / 2;
-				g2d.fillArc(hpx+1, delta_v+1, hpsize, hpsize, 0, 360);
-				
+			switch(mode) {
+			case Wiggle:
+				delta_h = (w - (iw + 2 * hborder)) / 2;
+				g2d.drawImage(wiggleTurn ? getRight() : getLeft(), null, delta_h + hborder, delta_v + vborder);
+				break;
+			default:
+				delta_h = (w - (iw*2 + hgap + 2 * hborder)) / 2;
+
+				if(helpPoints) {
+					int hpsize = vborder - 4;
+					g2d.setColor(getForeground());
+					int hpx = delta_h + (iw - hpsize) / 2;
+					g2d.fillArc(hpx+1, delta_v+1, hpsize, hpsize, 0, 360);
+					hpx = delta_h + iw + hgap + (iw - hpsize) / 2;
+					g2d.fillArc(hpx+1, delta_v+1, hpsize, hpsize, 0, 360);
+
+				}
+
+				g2d.drawImage(getRight(), null, delta_h + hborder, delta_v + vborder);
+				g2d.drawImage(getLeft(), null, delta_h + hborder + iw + hgap, delta_v + vborder);
 			}
-			
-			g2d.drawImage(getRight(), null, delta_h + hborder, delta_v + vborder);
-			g2d.drawImage(getLeft(), null, delta_h + hborder + iw + hgap, delta_v + vborder);
 		}
 	}
 	
@@ -560,6 +712,8 @@ public class SSMV implements Runnable {
 		frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
 		frame.addWindowListener(windowListener);
 		
+		frame.add(stereoPanel = new StereoPanel());
+		
 		JMenu fileMenu = new JMenu("File");
 		
 		fileMenu.add(withKeyStroke(setACAndText(new JMenuItem(fileAction), acOpen, "Open...", 'O'), KeyStroke.getKeyStroke(KeyEvent.VK_O, KeyEvent.CTRL_MASK)));
@@ -574,14 +728,36 @@ public class SSMV implements Runnable {
 		
 		imageMenu.add(withKeyStroke(setSelected(setACAndText(new JCheckBoxMenuItem(imageAction), acSwap, "Swap", 'S'), prefs.getBoolean(prefSwap, prefSwapDefault)), KeyStroke.getKeyStroke(KeyEvent.VK_S, KeyEvent.CTRL_MASK)));
 		imageMenu.add(withKeyStroke(setSelected(setACAndText(new JCheckBoxMenuItem(imageAction), acHelpPoints, "Help-Points", 'P'), prefs.getBoolean(prefHelpPoints, prefHelpPointsDefault)), KeyStroke.getKeyStroke(KeyEvent.VK_P, KeyEvent.CTRL_MASK)));
+		imageMenu.add(withKeyStroke(setACAndText(new JMenuItem(imageAction), acWiggleDelay, "Wiggle Delay...", 'D'), KeyStroke.getKeyStroke(KeyEvent.VK_D, KeyEvent.CTRL_MASK)));
+
+		JMenuItem modeSub = new JMenu("Mode");
+		ButtonGroup bg = new ButtonGroup();
+		
+		JMenuItem miCross = withKeyStroke(setACAndText(new JRadioButtonMenuItem(imageAction), acCross, "Cross-Eyed", 'C'), KeyStroke.getKeyStroke(KeyEvent.VK_C, KeyEvent.CTRL_MASK));;
+		JMenuItem miWiggle = withKeyStroke(setACAndText(new JRadioButtonMenuItem(imageAction), acWiggle, "Wiggle", 'W'), KeyStroke.getKeyStroke(KeyEvent.VK_W, KeyEvent.CTRL_MASK));
+		
+		bg.add(miCross);
+		bg.add(miWiggle);
+		
+		switch(stereoPanel.getStereoMode()) {
+		case Cross:
+			miCross.setSelected(true);
+			break;
+		case Wiggle:
+			miWiggle.setSelected(true);
+		}
+		
+		modeSub.add(miCross);
+		modeSub.add(miWiggle);
+		
+		imageMenu.add(modeSub);
+		
 		imageMenu.add(setACAndText(new JMenuItem(imageAction), acHGap, "Horz. Gap...", 'G'));
 		imageMenu.add(setACAndText(new JMenuItem(imageAction), acHBorder, "Horz. Border...", 'H'));
 		imageMenu.add(setACAndText(new JMenuItem(imageAction), acVBorder, "Vert. Border...", 'V'));
 		
 		menuBar.add(fileMenu);
 		menuBar.add(imageMenu);
-		
-		frame.add(stereoPanel = new StereoPanel());
 		
 		frame.setSize(640, 480);
 		frame.setVisible(true);
