@@ -517,6 +517,8 @@ public class SSMV implements Runnable {
 			stereoPanel.invalidate();
 		if( (frame.getExtendedState()&Frame.MAXIMIZED_BOTH) == 0 ) {
 			frame.pack();
+			if(stereoPanel!=null)
+				stereoPanel.repaint();
 		} else {
 			// and here comes the joy of spaghetti code... (happens in constructor)
 			if(stereoPanel!=null)
