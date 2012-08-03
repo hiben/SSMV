@@ -167,7 +167,7 @@ public class SSMV implements Runnable {
 			"If you need help aligning your eyes, helper points can be displayed above the image (default setting). Sometimes it is easier " +
 			"to concentrate just on the dots instead of the image.\n" +
 			"\n" +
-			"In addition two viewing the images side by side, the application also supports 'wiggle' stereo, where the two images " +
+			"In addition to viewing the images side by side, the application also supports 'wiggle' stereo, where the two images " +
 			"are quickly swapped. The effect depends strongly on the image...\n" +
 			"Your last option is viewing the images in anaglyph form where the left and right images are color-filtered. If you happen " +
 			"to have on of these red/cyan glasses lying around this might be worth a try (but this mode implies bad colors...).\n" +
@@ -395,14 +395,14 @@ public class SSMV implements Runnable {
 	};
 	
 	private Integer getNumber(String message, int initial, String error) {
-		String newgaps;
-		while( (newgaps = JOptionPane.showInputDialog(frame, message, ""+initial) ) != null ) {
+		String newnums;
+		while( (newnums = JOptionPane.showInputDialog(frame, message, ""+initial) ) != null ) {
 			try {
-				int newgap = Integer.parseInt(newgaps.trim());
-				if(newgap < 0)
+				int newnum = Integer.parseInt(newnums.trim());
+				if(newnum < 0)
 					throw new NumberFormatException();
 
-				return newgap;
+				return newnum;
 			} catch(NumberFormatException nfe) {
 				JOptionPane.showMessageDialog(frame, error + "\nPlease enter a natural number >= 0", "Error", JOptionPane.ERROR_MESSAGE);
 			}
@@ -442,8 +442,8 @@ public class SSMV implements Runnable {
 				if(amindex==null)
 					amindex = 0;
 				
-				stereoPanel.setAnanglyphMaskIndex(amindex);
-				prefs.putInt(prefAnaglyphMask, stereoPanel.getAnaglyphyMaskIndex());
+				stereoPanel.setAnaglyphMaskIndex(amindex);
+				prefs.putInt(prefAnaglyphMask, stereoPanel.getAnaglyphMaskIndex());
 				stereoPanel.repaint();
 			}
 			if(acHelpPoints.equals(e.getActionCommand())) {
@@ -579,7 +579,7 @@ public class SSMV implements Runnable {
 		
 		public StereoPanel() {
 			setStereoMode(stringToSM(prefs.get(prefMode, prefModeDefault)));
-			setAnanglyphMaskIndex(prefs.getInt(prefAnaglyphMask, prefAnaglyphMaskDefault));
+			setAnaglyphMaskIndex(prefs.getInt(prefAnaglyphMask, prefAnaglyphMaskDefault));
 		}
 		
 		public BufferedImage getAnaglyphImage() {
@@ -709,7 +709,7 @@ public class SSMV implements Runnable {
 			adjustImageAreaInFrame();
 		}
 		
-		public void setAnanglyphMaskIndex(int ami) {
+		public void setAnaglyphMaskIndex(int ami) {
 			if(ami == anaglyphMaskIndex)
 				return;
 			
@@ -720,7 +720,7 @@ public class SSMV implements Runnable {
 			repaint();
 		}
 		
-		public int getAnaglyphyMaskIndex() {
+		public int getAnaglyphMaskIndex() {
 			return anaglyphMaskIndex;
 		}
 		
@@ -900,7 +900,7 @@ public class SSMV implements Runnable {
 		JMenuItem anaglyphMaskSub = new JMenu("Anaglyph Mask");
 		ButtonGroup ambg = new ButtonGroup();
 		
-		int amset = stereoPanel.getAnaglyphyMaskIndex();
+		int amset = stereoPanel.getAnaglyphMaskIndex();
 		for(int i=0; i<anaglyphMasks.length; i++) {
 			JMenuItem mimask = setACAndText(new JRadioButtonMenuItem(imageAction), acAnaglyphMask, anaglyphMaskNames[i], null);
 			mimask.putClientProperty(dAMIndex, Integer.valueOf(i));
