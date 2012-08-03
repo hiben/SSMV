@@ -15,6 +15,4 @@ and as a bonus you can save the anaglyph image to disk.
 
 Planned features: image scaling to fit window
 
-current JAR Build
-
-http://dl.dropbox.com/u/77882088/SSMV/SSMV.jar
+current Jar build can be found in Downloads
