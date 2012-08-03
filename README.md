@@ -10,9 +10,9 @@ The MPO format (two JPEGs in one file) is used by various stereo cameras and the
 Currently the application supports cross- and wall-eyed viewing for presenting the image pairs. Recently
 'wiggle'-stereo was added where the images quickly alternate. The quality of the effect strongly depends on the 
 image...
+A last option is now anaglyph stereo with configurable filter colors (well... red, green or blue on the one side...)
+and as a bonus you can save the anaglyph image to disk.
 
-Planned features: anaglyph-stereo, image scaling to fit window
+Planned features: image scaling to fit window
 
-current JAR Build
-
-http://dl.dropbox.com/u/77882088/SSMV/SSMV.jar
+current Jar build can be found in Downloads
