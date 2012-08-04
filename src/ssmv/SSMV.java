@@ -156,6 +156,8 @@ public class SSMV implements Runnable {
 			"This simple tool can be used to view stereographic images in the MPO format that is used " +
 			"by several cameras and Nintendo's 3DS system\n" +
 			"I wrote it because I could not quicky find a tool to view these images in Linux (at least none that worked)\n" +
+			"After initially only supporting MPO files the application can now also load generic side-by-side images in any " +
+			"supported format (this includes JPS which is really just JPG).\n" +
 			"\n" +
 			"BACKGROUND\n" +
 			"MPO files are really just two JPEG images that have been saved into one file. The first one is for the left eye " +
@@ -302,6 +304,34 @@ public class SSMV implements Runnable {
 		});
 	}
 	
+	private void loadSideBySideImage(InputStream is) throws IOException {
+		BufferedImage bi = ImageIO.read(is);
+		
+		int w = bi.getWidth();
+		if(w == 1)
+			throw new IOException("Image is only one pixel wide! Can't use this...");
+		
+		int ih = bi.getHeight();
+		int iw = w / 2;
+		
+		boolean withAlpha = hasTransparency(bi);
+		
+		BufferedImage fi = new BufferedImage(iw, ih, withAlpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+		BufferedImage si = new BufferedImage(iw, ih, withAlpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+		
+		fi.createGraphics().drawImage(bi.getSubimage((w+1)/2, 0, iw, ih), null, 0,0);
+		si.createGraphics().drawImage(bi.getSubimage(0, 0, iw, ih), null, 0,0);
+		
+		leftEyeImage = fi;
+		rightEyeImage = si;
+		
+		EventQueue.invokeLater(new Runnable() {
+			public void run() {
+				adjustImageAreaInFrame();
+			}
+		});
+	}
+	
 	private void saveImage(BufferedImage bi, String dialogTitle) {
 		if(saveChooser == null) {
 			if(openChooser == null) {
@@ -354,8 +384,15 @@ public class SSMV implements Runnable {
 			if(acOpen.equals(e.getActionCommand())) {
 				if(openChooser.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION) {
 					try {
+						File infilef = openChooser.getSelectedFile();
 						FileInputStream fis = new FileInputStream(openChooser.getSelectedFile());
-						loadMPO(fis);
+						
+						if(openChooser.getFileFilter() == FileFilterMPO || getExt(infilef.getName()).toLowerCase().equals("mpo")) {
+							loadMPO(fis);
+						} else {
+							loadSideBySideImage(fis);
+						}
+						
 						frame.setTitle("SSMV - " + openChooser.getSelectedFile().getName());
 					} catch (FileNotFoundException fnfe) {
 						JOptionPane.showMessageDialog(frame, "The file you selected was not found...", "File not found!", JOptionPane.ERROR_MESSAGE);
@@ -823,23 +860,55 @@ public class SSMV implements Runnable {
 		return filename.substring(idx+1);
 	}
 	
+	public FileFilter FileFilterMPO = new FileFilter() {
+		@Override
+		public String getDescription() {
+			return "MPO Stereo JPEG Container (.MPO)";
+		}
+		
+		@Override
+		public boolean accept(File f) {
+			if(f.isDirectory())
+				return true;
+			return getExt(f.getName()).toLowerCase().equals("mpo");
+		}
+	};
+
+	public FileFilter FileFilterSideBySide = new FileFilter() {
+		@Override
+		public String getDescription() {
+			return "Side-by-Side Images (.JPS,.JPG,.PNG,.GIF,...)";
+		}
+		
+		@Override
+		public boolean accept(File f) {
+			if(f.isDirectory())
+				return true;
+			String ext = getExt(f.getName()).toLowerCase();
+
+			if(ext.equals("jps"))
+				return true;
+			if(ext.equals("jpg"))
+				return true;
+			if(ext.equals("jpeg"))
+				return true;
+			if(ext.equals("png"))
+				return true;
+			if(ext.equals("gif"))
+				return true;
+			if(ext.equals("bmp"))
+				return true;
+			
+			return false;
+		}
+	};
+	
 	public void run() {
 		openChooser = new JFileChooser();
 		
 		openChooser.setAcceptAllFileFilterUsed(true);
-		openChooser.addChoosableFileFilter(new FileFilter() {
-			@Override
-			public String getDescription() {
-				return "MPO Stereo JPEG Container (.MPO)";
-			}
-			
-			@Override
-			public boolean accept(File f) {
-				if(f.isDirectory())
-					return true;
-				return getExt(f.getName()).toLowerCase().equals("mpo");
-			}
-		});
+		openChooser.addChoosableFileFilter(FileFilterSideBySide);
+		openChooser.addChoosableFileFilter(FileFilterMPO);
 		
 		GraphicsDevice gd = MouseInfo.getPointerInfo().getDevice();
 		frame = new JFrame("SSMV", gd.getDefaultConfiguration());
@@ -932,6 +1001,7 @@ public class SSMV implements Runnable {
 			
 			JTextArea aboutText = new JTextArea(15, 64);
 			aboutText.setLineWrap(true);
+			aboutText.setWrapStyleWord(true);
 			aboutText.setText(about);
 			aboutText.setCaretPosition(0);
 			aboutText.setEditable(false);
