@@ -13,6 +13,7 @@ image...
 A last option is now anaglyph stereo with configurable filter colors (well... red, green or blue on the one side...)
 and as a bonus you can save the anaglyph image to disk.
 
-Planned features: image scaling to fit window
+Images can now optionally be scaled to fit the window - quite nice for these large 3d-photots some people upload...
+
 
 current Jar build can be found in Downloads
