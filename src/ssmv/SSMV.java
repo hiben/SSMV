@@ -23,18 +23,21 @@ SOFTWARE.
 package ssmv;
 
 import java.awt.Dimension;
-
 import java.awt.EventQueue;
 import java.awt.Frame;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.MouseInfo;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.geom.AffineTransform;
+import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
+import java.awt.image.BufferedImageOp;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -99,6 +102,9 @@ public class SSMV implements Runnable {
 	public static final String prefSwap = "swap";
 	public static final String prefHelpPoints = "helppoints";
 
+	public static final String prefResizeToWindow = "resize";
+	public static final String prefResizeOnlySmaller = "resizesmaller";
+
 	public static final String prefMode = "mode";
 	
 	public static final String prefWiggleDelay = "wiggledelay";
@@ -115,6 +121,8 @@ public class SSMV implements Runnable {
 	
 	public static final boolean prefSwapDefault = false;
 	public static final boolean prefHelpPointsDefault = true;
+	public static final boolean prefResizeToWindowDefault = false;
+	public static final boolean prefResizeOnlySmallerDefault = true;
 	
 	public static final String prefModeDefault = SCross; 
 	
@@ -134,6 +142,8 @@ public class SSMV implements Runnable {
 	private static final String acAnaglyphMask = "modeanaglyphmask";
 	private static final String acWiggle = "modewiggle";
 	private static final String acWiggleDelay = "wiggledelay";
+	private static final String acResizeToWindow = "resize";
+	private static final String acResizeOnlySmaller = "resizesmaller";
 	
 	private static final int [] anaglyphMasks = {
 		0xFF0000, // red
@@ -200,8 +210,16 @@ public class SSMV implements Runnable {
 	private JMenuBar menuBar;
 	private StereoPanel stereoPanel;
 	
+	private boolean resizeToWindow = prefs.getBoolean(prefResizeToWindow, prefResizeToWindowDefault);
+	private boolean resizeOnlySmaller = prefs.getBoolean(prefResizeOnlySmaller, prefResizeOnlySmallerDefault);
+	
 	private BufferedImage leftEyeImage = null;
 	private BufferedImage rightEyeImage = null;
+
+	private Object resizeLock = new Object();
+	
+	private BufferedImage leftEyeImageResized = null;
+	private BufferedImage rightEyeImageResized = null;
 	
 	private boolean swap = prefs.getBoolean(prefSwap, prefSwapDefault);
 	
@@ -217,15 +235,15 @@ public class SSMV implements Runnable {
 	}
 	
 	private BufferedImage getLeft() {
-		return swap ? rightEyeImage : leftEyeImage;
+		return swap ? rightEyeImageResized : leftEyeImageResized;
 	}
 
 	private BufferedImage getRight() {
-		return swap ? leftEyeImage : rightEyeImage;
+		return swap ? leftEyeImageResized : rightEyeImageResized;
 	}
 	
 	private boolean validImage() {
-		return leftEyeImage != null;
+		return leftEyeImageResized != null;
 	}
 	
 	private WindowAdapter windowListener = new WindowAdapter() {
@@ -294,8 +312,13 @@ public class SSMV implements Runnable {
 		if(fi.getWidth() != si.getWidth() || fi.getHeight() != si.getHeight())
 			throw new IOException("The two images differ in size!");
 		
-		leftEyeImage = fi;
-		rightEyeImage = si;
+		synchronized (resizeLock) {
+			leftEyeImage = fi;
+			rightEyeImage = si;
+			
+			leftEyeImageResized = leftEyeImage;
+			rightEyeImageResized = rightEyeImage;
+		}
 		
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
@@ -322,8 +345,13 @@ public class SSMV implements Runnable {
 		fi.createGraphics().drawImage(bi.getSubimage((w+1)/2, 0, iw, ih), null, 0,0);
 		si.createGraphics().drawImage(bi.getSubimage(0, 0, iw, ih), null, 0,0);
 		
-		leftEyeImage = fi;
-		rightEyeImage = si;
+		synchronized (resizeLock) {
+			leftEyeImage = fi;
+			rightEyeImage = si;
+			
+			leftEyeImageResized = leftEyeImage;
+			rightEyeImageResized = rightEyeImage;
+		}
 		
 		EventQueue.invokeLater(new Runnable() {
 			public void run() {
@@ -488,6 +516,16 @@ public class SSMV implements Runnable {
 				stereoPanel.setHelpPoints(jcbi.isSelected());
 				prefs.putBoolean(prefHelpPoints, stereoPanel.isHelpPoints());
 			}
+			if(acResizeToWindow.equals(e.getActionCommand())) {
+				JCheckBoxMenuItem jcbi = (JCheckBoxMenuItem)e.getSource();
+				resizeToWindow = jcbi.isSelected();
+				prefs.putBoolean(prefResizeToWindow, resizeToWindow);
+			}
+			if(acResizeOnlySmaller.equals(e.getActionCommand())) {
+				JCheckBoxMenuItem jcbi = (JCheckBoxMenuItem)e.getSource();
+				resizeOnlySmaller = jcbi.isSelected();
+				prefs.putBoolean(prefResizeOnlySmaller, resizeOnlySmaller);
+			}
 			if(acHGap.equals(e.getActionCommand())) {
 				int hgap = stereoPanel.getHGap();
 				
@@ -554,6 +592,22 @@ public class SSMV implements Runnable {
 			stereoPanel.invalidate();
 		if( (frame.getExtendedState()&Frame.MAXIMIZED_BOTH) == 0 ) {
 			frame.pack();
+			Dimension newSize = frame.getSize();
+			GraphicsConfiguration gc = frame.getGraphicsConfiguration().getDevice().getDefaultConfiguration();
+			boolean needsAdjust = false;
+			if(newSize.width > gc.getBounds().width) {
+				newSize.width = gc.getBounds().width;
+				needsAdjust = true;
+			}
+			if(newSize.height > gc.getBounds().height) {
+				newSize.height = gc.getBounds().height;
+				needsAdjust = true;
+			}
+			
+			if(needsAdjust) {
+				frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+			}
+			
 			if(stereoPanel!=null)
 				stereoPanel.repaint();
 		} else {
@@ -592,6 +646,73 @@ public class SSMV implements Runnable {
 		return dst;
 	}
 	
+	private class DynamicResizeThread extends Thread {
+		public DynamicResizeThread() {
+			setDaemon(true);
+			start();
+		}
+		
+		public void run() {
+			long lastResize = -1;
+			
+			while(isAlive()) {
+				Dimension bestSize;
+				
+				if(!resizeToWindow || !validImage() || (bestSize = stereoPanel.getMaxImageSize()) == null || (System.currentTimeMillis() - lastResize) < 500) {
+					
+					if(!resizeToWindow && validImage()) {
+						synchronized(resizeLock) {
+							if(leftEyeImage != leftEyeImageResized) {
+								leftEyeImageResized = leftEyeImage;
+								rightEyeImageResized = rightEyeImage;
+
+								stereoPanel.repaint();
+							}
+						}
+					}
+					
+					try {
+						sleep(100);
+					} catch (InterruptedException e) {
+					}
+					continue;
+				}
+				
+				synchronized(resizeLock) {
+
+					float scaleh = (float)bestSize.width / (float)leftEyeImage.getWidth();
+					float scalev = (float)bestSize.height / (float)leftEyeImage.getHeight();
+					
+					float scale = Math.min(scaleh, scalev);
+					
+					if(scale < 1.0f || !resizeOnlySmaller) {
+
+						int sw = (scale == scaleh) ? bestSize.width : (int)(leftEyeImage.getWidth() * scale);
+						int sh = (scale == scalev) ? bestSize.height : (int)(leftEyeImage.getHeight() * scale);
+
+						if(leftEyeImageResized == null || leftEyeImageResized.getWidth() != sw || leftEyeImageResized.getHeight() != sh) {
+
+							leftEyeImageResized = new BufferedImage(sw, sh, hasTransparency(leftEyeImage) ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+							rightEyeImageResized = new BufferedImage(sw, sh, hasTransparency(leftEyeImage) ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB);
+
+							BufferedImageOp scaleOp = new AffineTransformOp(AffineTransform.getScaleInstance(scale, scale), AffineTransformOp.TYPE_BICUBIC);
+
+							leftEyeImageResized.createGraphics().drawImage(leftEyeImage, scaleOp, 0, 0);
+							rightEyeImageResized.createGraphics().drawImage(rightEyeImage, scaleOp, 0, 0);
+						}
+					} else {
+						leftEyeImageResized = leftEyeImage;
+						rightEyeImageResized = rightEyeImage;
+					}
+					
+					lastResize = System.currentTimeMillis();
+				}
+				
+				stereoPanel.repaint();
+			}
+		}
+	}
+	
 	public class StereoPanel extends JPanel {
 		private static final long serialVersionUID = 1L;
 		
@@ -614,6 +735,17 @@ public class SSMV implements Runnable {
 		private int usedIndex = -1;
 		private int anaglyphMaskIndex;
 		
+		private Dimension maxImageSize = null;
+		private long lastSizeUpdate = -1L;
+		
+		public Dimension getMaxImageSize() {
+			return maxImageSize;
+		}
+		
+		public long getLastSizeUpdate() {
+			return lastSizeUpdate;
+		}
+		
 		public StereoPanel() {
 			setStereoMode(stringToSM(prefs.get(prefMode, prefModeDefault)));
 			setAnaglyphMaskIndex(prefs.getInt(prefAnaglyphMask, prefAnaglyphMaskDefault));
@@ -626,6 +758,7 @@ public class SSMV implements Runnable {
 			if(anaglyph == null || anaglyphSourceLeft != getLeft() || usedIndex != anaglyphMaskIndex) {
 				anaglyphSourceLeft = getLeft();
 				anaglyphSourceRight = getRight();
+				usedIndex = anaglyphMaskIndex;
 				anaglyph = createAnaglyphImage(anaglyphSourceLeft, anaglyphSourceRight, anaglyphMasks[anaglyphMaskIndex], anaglyph);
 			}
 			return anaglyph;
@@ -824,6 +957,9 @@ public class SSMV implements Runnable {
 			int delta_h;
 			int delta_v = (h - (ih + 2 * vborder)) / 2;;
 			
+			int mh = h - 2 * vborder;
+			int mw = w - (2 * hborder + hgap);
+			
 			switch(mode) {
 			case Anaglyph:
 				delta_h = (w - (iw + 2 * hborder)) / 2;
@@ -836,6 +972,7 @@ public class SSMV implements Runnable {
 				break;
 			default:
 				delta_h = (w - (iw*2 + hgap + 2 * hborder)) / 2;
+				mw /= 2;
 
 				if(helpPoints) {
 					int hpsize = vborder - 4;
@@ -849,6 +986,13 @@ public class SSMV implements Runnable {
 
 				g2d.drawImage(getRight(), null, delta_h + hborder, delta_v + vborder);
 				g2d.drawImage(getLeft(), null, delta_h + hborder + iw + hgap, delta_v + vborder);
+			}
+			
+			Dimension cm = maxImageSize;
+			
+			if(cm == null || cm.width != mw || cm.height != mh) {
+				maxImageSize = new Dimension(mw, mh);
+				lastSizeUpdate = System.currentTimeMillis();
 			}
 		}
 	}
@@ -963,6 +1107,8 @@ public class SSMV implements Runnable {
 		modeSub.add(miCross);
 		modeSub.add(miAnaglyph);
 		modeSub.add(miWiggle);
+		imageMenu.add(withKeyStroke(setSelected(setACAndText(new JCheckBoxMenuItem(imageAction), acResizeToWindow, "Resize to Window", 'z'), prefs.getBoolean(prefResizeToWindow, prefResizeToWindowDefault)), KeyStroke.getKeyStroke(KeyEvent.VK_Z, KeyEvent.CTRL_MASK)));
+		imageMenu.add(withKeyStroke(setSelected(setACAndText(new JCheckBoxMenuItem(imageAction), acResizeOnlySmaller, "Only shrink Image", 'i'), prefs.getBoolean(prefResizeOnlySmaller, prefResizeOnlySmallerDefault)), KeyStroke.getKeyStroke(KeyEvent.VK_I, KeyEvent.CTRL_MASK)));
 		
 		imageMenu.add(modeSub);
 		
@@ -990,6 +1136,8 @@ public class SSMV implements Runnable {
 		
 		frame.setSize(640, 480);
 		frame.setVisible(true);
+		
+		new DynamicResizeThread();
 	}
 	
 	private JFrame aboutWindow;
